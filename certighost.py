@@ -255,7 +255,7 @@ class NLOracle:
         r["LogonInformation"]["tag"] = r["LogonLevel"]
         ident = r["LogonInformation"]["LogonNetworkTransitive"]["Identity"]
         ident["LogonDomainName"] = am["domain_name"].decode("utf-16le")
-        ident["ParameterControl"] = 2**11
+        ident["ParameterControl"] = 0x820
         ident["UserName"] = am["user_name"].decode("utf-16le"); ident["Workstation"] = ""
         r["LogonInformation"]["LogonNetworkTransitive"]["LmChallenge"] = challenge
         r["LogonInformation"]["LogonNetworkTransitive"]["NtChallengeResponse"] = am["ntlm"]
