@@ -798,11 +798,14 @@ def create_computer_ldaps(conn, dn, comp_name, comp_pass):
     conn.add(comp_dn, ["top", "person", "organizationalPerson", "user", "computer"], attrs)
 
 def create_computer_samr(dc_ip, domain, username, password, lmhash, nthash,
-                         comp_name, comp_pass, use_kerberos=False, aes_key=''):
+                         comp_name, comp_pass, use_kerberos=False, aes_key='',
+                         dc_host=''):
     binding = epm.hept_map(dc_ip, samr.MSRPC_UUID_SAMR, protocol='ncacn_np')
     rpctransport = transport.DCERPCTransportFactory(binding)
     rpctransport.setRemoteHost(dc_ip)
     if use_kerberos:
+        if dc_host:
+            rpctransport.setRemoteName(dc_host)
         rpctransport.set_credentials(username, password, domain, aesKey=aes_key)
         rpctransport.set_kerberos(True, dc_ip)
     else:
@@ -842,12 +845,14 @@ def create_computer_samr(dc_ip, domain, username, password, lmhash, nthash,
     dce.disconnect()
 
 def create_computer(conn, dc_ip, domain, username, password, lmhash, nthash,
-                    comp_name, comp_pass, dn, use_kerberos=False, aes_key=''):
+                    comp_name, comp_pass, dn, use_kerberos=False, aes_key='',
+                    dc_host=''):
     try:
         create_computer_ldaps(conn, dn, comp_name, comp_pass)
     except Exception:
         create_computer_samr(dc_ip, domain, username, password, lmhash, nthash,
-                             comp_name, comp_pass, use_kerberos=use_kerberos, aes_key=aes_key)
+                             comp_name, comp_pass, use_kerberos=use_kerberos,
+                             aes_key=aes_key, dc_host=dc_host)
 
 
 def port_ok(h, p, t=1.0):
@@ -993,7 +998,7 @@ def main():
         print(f"[*] Creating computer: {comp_name}")
         try:
             create_computer(conn, dc_ip, domain, user, password, lmhash, nthash,
-                           comp_name, comp_pass, dn, use_kerberos, aes_key)
+                           comp_name, comp_pass, dn, use_kerberos, aes_key, dc_host)
         except Exception as e:
             print(f"[!] Computer creation failed: {e}"); sys.exit(1)
         comp_hash = compute_nthash(comp_pass)
