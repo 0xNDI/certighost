@@ -1,6 +1,6 @@
 # CVE-2026-54121 (Certighost)
 
-This is a proof-of-concept tool to demonstrace CVE-2026-54121 a.k.a _Certighost_. Read this blog post https://gist.github.com/H0j3n/a5ef2609b5f2944ac2390a191a534c26 for the detailed analysis.
+This is a proof-of-concept tool to demonstrace CVE-2026-54121 a.k.a _Certighost_. Read here https://gist.github.com/H0j3n/a5ef2609b5f2944ac2390a191a534c26 for the detailed analysis.
 
 ## Usage
 
