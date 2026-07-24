@@ -858,8 +858,8 @@ def main():
     p.add_argument("--use-ldap", action="store_true", help="Use LDAP (389) instead of LDAPS (636)")
     args = p.parse_args()
 
-    if os.geteuid() != 0:
-        print("[!] Must run as root (ports 445+389)"); sys.exit(1)
+    # if os.geteuid() != 0:
+    #     print("[!] Must run as root (ports 445+389)"); sys.exit(1)
 
     domain, user, dc_ip = args.domain, args.username, args.dc_ip
     password = args.password or ""
