@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "CertiGhost - CVE-2026-54121 cdc-redirect chain PoC"
 requires-python = ">=3.10"
 dependencies = [
-    "impacket @ git+https://github.com/0xNDI/impacket",
+    "impacket",
     "asn1crypto",
     "cryptography",
     "pycryptodomex",
