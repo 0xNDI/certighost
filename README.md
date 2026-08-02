@@ -2,12 +2,18 @@
 
 This is a proof-of-concept tool to demonstrace CVE-2026-54121 a.k.a _Certighost_. Read here https://gist.github.com/H0j3n/a5ef2609b5f2944ac2390a191a534c26 for the detailed analysis.
 
-## Usage
-
-Run as root because the rogue LDAP and SMB services listen on high privileged ports 389 and 445.
+## Install
 
 ```bash
-sudo python3 certighost.py -d playground.local -u lowpriv -p 'Password1234' --dc-ip 192.168.1.10
+uv tool install git+https://github.com/0xNDI/certighost
+```
+
+This installs a `certighost` command (symlinked into `~/.local/bin`).
+
+## Usage
+
+```bash
+certighost -d playground.local -u lowpriv -p 'Password1234' --dc-ip 192.168.1.10
 ```
 
 Successful execution writes the target certificate (`.pfx`) and Kerberos cache (`.ccache`) to the current directory.
